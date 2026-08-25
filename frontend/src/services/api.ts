@@ -36,7 +36,17 @@ export const api = {
   async getSessionMessages(sessionId: string): Promise<Message[]> {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`);
     if (!res.ok) throw new Error('Failed to fetch messages');
-    return res.json();
+    const raw: any[] = await res.json();
+    // Explicitly map backend `metadata` (which contains artifact_id) to our Message type
+    return raw.map((m) => ({
+      id: m.id,
+      session_id: m.session_id,
+      role: m.role,
+      content: m.content,
+      citations: m.citations || [],
+      created_at: m.created_at,
+      metadata: m.metadata || {},
+    }));
   },
 
   async deleteSession(sessionId: string): Promise<void> {

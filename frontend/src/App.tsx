@@ -304,7 +304,17 @@ export const App: React.FC = () => {
 
       // Reload real messages from DB so View Artifact button / metadata is correct
       const freshMsgs = await api.getSessionMessages(sessionIdAtStart);
-      setMessages(freshMsgs);
+
+      // Guarantee the artifact_id is on the last assistant message even if DB metadata is missing
+      const msgsWithArtifact = freshMsgs.map((m, idx) => {
+        const isLastAssistant = m.role === 'assistant' && idx === freshMsgs.length - 1;
+        const alreadyHasArtifact = m.metadata?.artifact_id;
+        if (isLastAssistant && !alreadyHasArtifact) {
+          return { ...m, metadata: { ...m.metadata, artifact_id: art.id } };
+        }
+        return m;
+      });
+      setMessages(msgsWithArtifact);
 
       // Refresh session list (title may have changed)
       const updatedSessions = await api.listSessions();
