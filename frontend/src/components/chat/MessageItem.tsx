@@ -209,7 +209,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
               </div>
               <button
                 onClick={() => onOpenArtifact(message.metadata!.artifact_id!)}
-                className="px-3 py-1 rounded text-xs font-semibold bg-amber-500 text-gray-200 hover:bg-amber-400 transition-all cursor-pointer"
+                className="px-3 py-1 rounded text-xs font-bold bg-amber-500 text-[#10131C] hover:bg-amber-400 transition-all cursor-pointer"
               >
                 View Artifact
               </button>
@@ -218,12 +218,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
           {/* Action Chips */}
           {isAssistant && (
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-2 pb-1">
               <button
                 onClick={() => onGenerateShip30FromMessage(message.content)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-[#94A3B8] hover:text-amber-400 hover:bg-[#161B26] border border-transparent hover:border-amber-500/20 transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/50 transition-all cursor-pointer shadow-sm"
               >
-                <Layers className="w-3 h-3 text-amber-400" />
+                <Layers className="w-3.5 h-3.5" />
                 Turn into Ship 30 Essay
               </button>
             </div>

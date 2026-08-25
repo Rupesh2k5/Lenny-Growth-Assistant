@@ -9,4 +9,4 @@ Relevant Knowledge Excerpts:
 Conversation Context:
 {conversation_history}
 
-Generate a complete, polished ~1,250-word digital essay formatted in clean Markdown.
+Generate a complete, polished ~250-word digital essay formatted in clean Markdown.

@@ -15,7 +15,7 @@ export const Ship30Modal: React.FC<Ship30ModalProps> = ({
   defaultTopic = '',
 }) => {
   const [topic, setTopic] = useState(defaultTopic || '');
-  const [targetLength, setTargetLength] = useState(1250);
+  const [targetLength, setTargetLength] = useState(250);
 
   if (!isOpen) return null;
 
@@ -98,7 +98,7 @@ export const Ship30Modal: React.FC<Ship30ModalProps> = ({
             <div className="grid grid-cols-3 gap-2">
               {[
                 { label: 'Atomic (~500 words)', val: 500 },
-                { label: 'Standard (~1,250 words)', val: 1250 },
+                { label: 'Standard (~250 words)', val: 250 },
                 { label: 'Deep Dive (~2,000 words)', val: 2000 },
               ].map((opt) => (
                 <button

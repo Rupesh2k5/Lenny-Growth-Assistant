@@ -4,7 +4,7 @@ from app.models.provider import BaseLLMProvider
 SHIP30_SYSTEM_PROMPT = """You are an expert digital essayist trained in the Ship 30 for 30 writing methodology, specialized in translating deep product management and growth wisdom into viral, high-signal essays.
 
 ESSAY SPECIFICATIONS:
-1. Target Length: Approximately 1,000 to 1,250 words.
+1. Target Length: Approximately 250 words.
 2. Structure:
    - **Headline**: Irresistible, high-contrast, specific (e.g. "The 4-Step PMF Engine: Why 80% of Startups Scale Too Early").
    - **The Hook (First 3 sentences)**: Disrupt conventional wisdom immediately. Use short, punchy cadence.
