@@ -275,32 +275,50 @@ export const App: React.FC = () => {
 
   const handleGenerateShip30 = async (topic: string, length: number) => {
     if (!activeSessionId) return;
+    const sessionIdAtStart = activeSessionId;
+
+    // Immediately show user message in chat
+    const userMsg: Message = {
+      id: `msg-${Date.now()}`,
+      session_id: sessionIdAtStart,
+      role: 'user',
+      content: `Write a Ship 30 for 30 essay about: ${topic}`,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
-    setLoadingSessionId(activeSessionId);
+    setLoadingSessionId(sessionIdAtStart);
     setLoadingStage(`Generating ~${length} word Ship 30 for 30 essay...`);
 
     try {
       const art = await api.generateShip30Essay({
-        sessionId: activeSessionId,
+        sessionId: sessionIdAtStart,
         topic,
         targetLength: length,
         provider: activeProvider,
       });
 
+      // Open artifact viewer
       setActiveArtifact(art);
       setIsArtifactViewerOpen(true);
 
-      const asstMsg: Message = {
-        id: `msg-${Date.now()}`,
-        session_id: activeSessionId,
-        role: 'assistant',
-        content: `I've synthesized your **Ship 30 for 30 essay**: *"${art.title}"* (~${art.metadata?.word_count || length} words).\n\nYou can read, preview, copy, or export the rendered essay in the side Artifact Viewer.`,
-        created_at: new Date().toISOString(),
-        metadata: { artifact_id: art.id },
-      };
-      setMessages((prev) => [...prev, asstMsg]);
+      // Reload real messages from DB so View Artifact button / metadata is correct
+      const freshMsgs = await api.getSessionMessages(sessionIdAtStart);
+      setMessages(freshMsgs);
+
+      // Refresh session list (title may have changed)
+      const updatedSessions = await api.listSessions();
+      setSessions(updatedSessions);
+
     } catch (e) {
       console.error('Ship 30 generation error:', e);
+      setMessages((prev) => [...prev, {
+        id: `err-${Date.now()}`,
+        session_id: sessionIdAtStart,
+        role: 'assistant',
+        content: '⚠️ Essay generation failed. Please try again.',
+        created_at: new Date().toISOString(),
+      }]);
     } finally {
       setIsLoading(false);
       setLoadingSessionId(null);
@@ -408,7 +426,10 @@ export const App: React.FC = () => {
       <Ship30Modal
         isOpen={isShip30ModalOpen}
         onClose={() => setIsShip30ModalOpen(false)}
-        onGenerate={handleGenerateShip30}
+        onGenerate={(topic, length) => {
+          setIsShip30ModalOpen(false);
+          handleGenerateShip30(topic, length);
+        }}
         defaultTopic={ship30DefaultTopic}
       />
 

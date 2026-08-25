@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.database import get_db
-from app.db.models import Session, Artifact
+from app.db.models import Session, Artifact, Message
 from app.models.factory import provider_factory
 from app.retrieval.retriever import retriever
 from app.agents.ship30 import Ship30Skill
@@ -59,8 +59,27 @@ async def generate_ship30_essay(body: Ship30Request, db: AsyncSession = Depends(
         artifact_metadata={"skill": "ship30", "word_count": result["word_count"]}
     )
     db.add(artifact)
+    await db.flush()  # get artifact.id without full commit
+
+    # Save user message to history
+    user_msg = Message(
+        session_id=session.id,
+        role="user",
+        content=f"Write a Ship 30 for 30 essay about: {body.topic}"
+    )
+    db.add(user_msg)
+
+    # Save assistant message linking to artifact
+    asst_msg = Message(
+        session_id=session.id,
+        role="assistant",
+        content=f"Here is your **Ship 30 for 30 essay**: *\"{result['title']}\"* (~{result['word_count']} words).\n\nOpen the Artifact Viewer on the right to read and export the full rendered essay.",
+        message_metadata={"artifact_id": artifact.id}
+    )
+    db.add(asst_msg)
     await db.commit()
     await db.refresh(artifact)
+    await db.refresh(asst_msg)
 
     return {
         "artifact_id": artifact.id,
@@ -69,7 +88,8 @@ async def generate_ship30_essay(body: Ship30Request, db: AsyncSession = Depends(
         "content": artifact.content,
         "word_count": result["word_count"],
         "model": result["model"],
-        "provider": result["provider"]
+        "provider": result["provider"],
+        "assistant_message_id": asst_msg.id
     }
 
 @router.post("/artifact")
