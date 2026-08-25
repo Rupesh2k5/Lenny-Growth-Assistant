@@ -56,6 +56,38 @@ export const api = {
     if (!res.ok) throw new Error('Failed to delete session');
   },
 
+  // Queue-based chat — returns immediately, generation runs in background
+  async queueMessage(params: {
+    sessionId: string;
+    message: string;
+    provider?: string;
+  }): Promise<{ user_message_id: string; assistant_message_id: string; session_id: string }> {
+    const res = await fetch(`${API_BASE}/chat/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: params.sessionId,
+        message: params.message,
+        provider: params.provider,
+      }),
+    });
+    if (!res.ok) throw new Error('Failed to queue message');
+    return res.json();
+  },
+
+  // Poll a single message's status/content
+  async pollMessageStatus(messageId: string): Promise<{
+    id: string;
+    status: 'generating' | 'complete' | 'error';
+    content: string;
+    citations: any[];
+    metadata: any;
+  }> {
+    const res = await fetch(`${API_BASE}/chat/status/${messageId}`);
+    if (!res.ok) throw new Error('Failed to poll message');
+    return res.json();
+  },
+
   // Chat (Standard REST)
   async sendMessage(params: {
     sessionId: string;

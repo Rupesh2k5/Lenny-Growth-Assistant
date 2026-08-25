@@ -1,105 +1,88 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Header } from './components/layout/Header';
-import { Sidebar } from './components/layout/Sidebar';
-import { ChatArea } from './components/chat/ChatArea';
-import { SourceDrawer } from './components/chat/SourceDrawer';
-import { ArtifactViewer } from './components/artifacts/ArtifactViewer';
-import { Ship30Modal } from './components/skills/Ship30Modal';
-import { ModelSelector } from './components/common/ModelSelector';
-import { api } from './services/api';
-import { Session, Message, Citation, Artifact, LLMHealthStatus, Source } from './types';
+﻿import React, { useState, useEffect, useRef } from "react";
+import { Header } from "./components/layout/Header";
+import { Sidebar } from "./components/layout/Sidebar";
+import { ChatArea } from "./components/chat/ChatArea";
+import { SourceDrawer } from "./components/chat/SourceDrawer";
+import { ArtifactViewer } from "./components/artifacts/ArtifactViewer";
+import { Ship30Modal } from "./components/skills/Ship30Modal";
+import { ModelSelector } from "./components/common/ModelSelector";
+import { api } from "./services/api";
+import { Session, Message, Citation, Artifact, LLMHealthStatus } from "./types";
 
 export const App: React.FC = () => {
-  // State
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [activeProvider, setActiveProvider] = useState<string>('ollama');
+  const [activeProvider, setActiveProvider] = useState<string>("ollama");
   const [llmStatus, setLlmStatus] = useState<LLMHealthStatus | null>(null);
-
-  // Loaders & Progressive Stages
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [loadingStage, setLoadingStage] = useState<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Drawers & Modals
+  const pollingRef = useRef<boolean>(false);
   const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState<boolean>(false);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const [allCitations, setAllCitations] = useState<Citation[]>([]);
-
   const [isArtifactViewerOpen, setIsArtifactViewerOpen] = useState<boolean>(false);
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
-
   const [isShip30ModalOpen, setIsShip30ModalOpen] = useState<boolean>(false);
-  const [ship30DefaultTopic, setShip30DefaultTopic] = useState<string>('');
-
+  const [ship30DefaultTopic, setShip30DefaultTopic] = useState<string>("");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState<boolean>(false);
 
-  // 1. Initial Load: Fetch Sessions & LLM Health
   useEffect(() => {
     loadInitialData();
-    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+    if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
   }, []);
 
   const loadInitialData = async () => {
     try {
-      const [fetchedSessions, fetchedLlm] = await Promise.all([
-        api.listSessions(),
-        api.getLLMStatus(),
-      ]);
+      const [fetchedSessions, fetchedLlm] = await Promise.all([api.listSessions(), api.getLLMStatus()]);
       setSessions(fetchedSessions);
       setLlmStatus(fetchedLlm);
-      if (fetchedLlm.active_provider) {
-        setActiveProvider(fetchedLlm.active_provider);
-      }
-
+      if (fetchedLlm.active_provider) setActiveProvider(fetchedLlm.active_provider);
       if (fetchedSessions.length > 0) {
-        selectSession(fetchedSessions[0].id);
+        await selectSession(fetchedSessions[0].id, true);
       } else {
         createNewSession();
       }
     } catch (e) {
-      console.error('Initial data load failed:', e);
-      const defaultId = 'demo-session-pmf-engine';
-      setActiveSessionId(defaultId);
+      console.error("Initial data load failed:", e);
+      setActiveSessionId("demo-session-pmf-engine");
     }
   };
 
   const refreshLLMStatus = async () => {
-    try {
-      const status = await api.getLLMStatus();
-      setLlmStatus(status);
-    } catch (e) {
-      console.error('Failed to refresh LLM status:', e);
-    }
+    try { setLlmStatus(await api.getLLMStatus()); } catch (e) { console.error(e); }
   };
 
-  // 2. Session Management
-  const selectSession = async (sessionId: string) => {
-    if (sessionId === activeSessionId) return;
+  const selectSession = async (sessionId: string, force = false) => {
+    if (sessionId === activeSessionId && !force) return;
     setActiveSessionId(sessionId);
     try {
       const msgs = await api.getSessionMessages(sessionId);
       setMessages(msgs);
-
-      // Extract all citations in session
-      const citations = msgs.flatMap((m) => m.citations || []);
-      setAllCitations(citations);
-
-      // Check if last message has artifact
-      const lastMsgWithArt = [...msgs].reverse().find((m) => m.metadata?.artifact_id);
-      if (lastMsgWithArt && lastMsgWithArt.metadata?.artifact_id) {
-        const art = await api.getArtifact(lastMsgWithArt.metadata.artifact_id);
-        setActiveArtifact(art);
-        setIsArtifactViewerOpen(true);
+      setAllCitations(msgs.flatMap((m) => m.citations || []));
+      const lastArt = [...msgs].reverse().find((m) => m.metadata?.artifact_id);
+      if (lastArt?.metadata?.artifact_id) {
+        try {
+          const art = await api.getArtifact(lastArt.metadata.artifact_id);
+          setActiveArtifact(art);
+          setIsArtifactViewerOpen(true);
+        } catch (_) { setIsArtifactViewerOpen(false); }
       } else {
         setIsArtifactViewerOpen(false);
       }
+      // Resume polling if last message is still generating
+      const lastMsg = msgs[msgs.length - 1];
+      if (lastMsg?.role === "assistant" && lastMsg.metadata?.status === "generating") {
+        setIsLoading(true);
+        setLoadingSessionId(sessionId);
+        setLoadingStage("Resuming generation...");
+        pollUntilComplete(lastMsg.id, sessionId);
+      }
     } catch (e) {
-      console.error('Failed to load session messages:', e);
+      console.error("Failed to load session messages:", e);
     }
   };
 
@@ -111,9 +94,7 @@ export const App: React.FC = () => {
       setMessages([]);
       setIsArtifactViewerOpen(false);
       setIsSourceDrawerOpen(false);
-    } catch (e) {
-      console.error('Failed to create session:', e);
-    }
+    } catch (e) { console.error("Failed to create session:", e); }
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -122,245 +103,141 @@ export const App: React.FC = () => {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSessionId === sessionId) {
         const remaining = sessions.filter((s) => s.id !== sessionId);
-        if (remaining.length > 0) {
-          selectSession(remaining[0].id);
-        } else {
-          createNewSession();
-        }
+        remaining.length > 0 ? selectSession(remaining[0].id) : createNewSession();
       }
+    } catch (e) { console.error("Failed to delete session:", e); }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    if (!activeSessionId || isLoading) return;
+    const sessionIdAtStart = activeSessionId;
+    const tempUserId = `temp-user-${Date.now()}`;
+    const tempAsstId = `temp-asst-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: tempUserId, session_id: sessionIdAtStart, role: "user", content: text, created_at: new Date().toISOString() },
+      { id: tempAsstId, session_id: sessionIdAtStart, role: "assistant", content: "", created_at: new Date().toISOString() },
+    ]);
+    setIsLoading(true);
+    setLoadingSessionId(sessionIdAtStart);
+    setLoadingStage("Sending message...");
+    try {
+      const queued = await api.queueMessage({ sessionId: sessionIdAtStart, message: text, provider: activeProvider });
+      setMessages((prev) => prev.map((m) => {
+        if (m.id === tempUserId) return { ...m, id: queued.user_message_id };
+        if (m.id === tempAsstId) return { ...m, id: queued.assistant_message_id, metadata: { status: "generating" } };
+        return m;
+      }));
+      setLoadingStage("Generating response...");
+      await pollUntilComplete(queued.assistant_message_id, sessionIdAtStart);
     } catch (e) {
-      console.error('Failed to delete session:', e);
+      console.error("Send message error:", e);
+      setMessages((prev) => prev.filter((m) => m.id !== tempAsstId && m.id !== tempUserId));
+      setMessages((prev) => [...prev, {
+        id: `err-${Date.now()}`, session_id: sessionIdAtStart, role: "assistant",
+        content: "Failed to send. Check your connection and try again.", created_at: new Date().toISOString(),
+      }]);
+      setIsLoading(false);
+      setLoadingSessionId(null);
+      setLoadingStage(null);
     }
   };
 
-  // 3. Live Streaming Chat Messaging (SSE)
-  const handleSendMessage = async (text: string) => {
-    if (!activeSessionId || isLoading) return;
-
-    // Optimistically append user message
-    const userMsg: Message = {
-      id: `temp-${Date.now()}`,
-      session_id: activeSessionId,
-      role: 'user',
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-
-    const streamMsgId = `asst-stream-${Date.now()}`;
-    const streamingAssistantMsg: Message = {
-      id: streamMsgId,
-      session_id: activeSessionId,
-      role: 'assistant',
-      content: '',
-      citations: [],
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMsg, streamingAssistantMsg]);
-    setIsLoading(true);
-    setLoadingSessionId(activeSessionId);
-    setLoadingStage('Searching Lenny transcript repository...');
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    let accumulatedContent = '';
-
-    await api.streamMessage({
-      sessionId: activeSessionId,
-      message: text,
-      provider: activeProvider,
-      signal: abortController.signal,
-      onStageUpdate: (_stage, message) => {
-        setLoadingStage(message);
-      },
-      onToken: (token) => {
-        accumulatedContent += token;
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamMsgId ? { ...msg, content: accumulatedContent } : msg
-          )
-        );
-      },
-      onComplete: async (data) => {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamMsgId
-              ? {
-                  ...msg,
-                  id: data.messageId || streamMsgId,
-                  content: data.fullContent,
-                  citations: data.citations,
-                  metadata: {
-                    intent: data.intent,
-                    artifact_id: data.artifactId,
-                  },
-                }
-              : msg
-          )
-        );
-
-        if (data.citations && data.citations.length > 0) {
-          setAllCitations((prev) => [...prev, ...data.citations]);
+  const pollUntilComplete = async (messageId: string, sessionId: string) => {
+    pollingRef.current = true;
+    const MAX_POLLS = 150;
+    let polls = 0;
+    const poll = async (): Promise<void> => {
+      if (!pollingRef.current || polls >= MAX_POLLS) {
+        setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
+        return;
+      }
+      polls++;
+      try {
+        const status = await api.pollMessageStatus(messageId);
+        if (status.status === "generating" || status.content === "") {
+          if (polls < 3) setLoadingStage("Searching Lenny transcript repository...");
+          else if (polls < 8) setLoadingStage("Synthesizing insights from transcripts...");
+          else setLoadingStage("Generating grounded response...");
+          await new Promise((r) => setTimeout(r, 2000));
+          return poll();
         }
-
-        if (data.artifactId) {
+        setMessages((prev) => prev.map((m) =>
+          m.id === messageId
+            ? { ...m, content: status.content, citations: status.citations || [], metadata: status.metadata || {} }
+            : m
+        ));
+        if (status.metadata?.artifact_id) {
           try {
-            const art = await api.getArtifact(data.artifactId);
-            setActiveArtifact(art);
-            setIsArtifactViewerOpen(true);
-          } catch (err) {
-            console.error('Failed to fetch generated artifact:', err);
-          }
+            const art = await api.getArtifact(status.metadata.artifact_id);
+            setActiveArtifact(art); setIsArtifactViewerOpen(true);
+          } catch (e) { console.error(e); }
         }
-
-        // Refresh session list for title update
+        if (status.citations?.length > 0) {
+          setAllCitations((prev) => [...prev, ...status.citations]);
+        }
         const updatedSessions = await api.listSessions();
         setSessions(updatedSessions);
-        setIsLoading(false);
-        setLoadingSessionId(null);
-        setLoadingStage(null);
-
-        // Fetch latest messages to guarantee consistency if user navigated away and back
-        try {
-          const freshMsgs = await api.getSessionMessages(params.sessionId);
-          // Only update if we are still looking at the same session!
-          setMessages((currentMsgs) => {
-            // Check if current messages belong to this session
-            if (currentMsgs.length > 0 && currentMsgs[0].session_id === params.sessionId) {
-              return freshMsgs;
-            }
-            return currentMsgs;
-          });
-        } catch (e) {
-          console.error(e);
+        setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
+        pollingRef.current = false;
+        if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+          new Notification("Lenny Growth Assistant", { body: "Your response is ready!", icon: "/vite.svg" });
         }
-
-        // Notify user if they are on another tab
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification('Lenny Growth Assistant', {
-            body: 'Your response is ready!',
-            icon: '/vite.svg',
-          });
-        }
-      },
-      onError: (err) => {
-        console.error('Streaming chat error, falling back:', err);
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamMsgId
-              ? {
-                  ...msg,
-                  content:
-                    "### Connection Notice\n\nUnable to reach the active LLM provider. Please check that local Ollama is running or switch to the Deterministic Offline provider in the top-right model switcher.",
-                }
-              : msg
-          )
-        );
-        setIsLoading(false);
-        setLoadingSessionId(null);
-        setLoadingStage(null);
-      },
-    });
+      } catch (e) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return poll();
+      }
+    };
+    return poll();
   };
 
   const handleStopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsLoading(false);
-    setLoadingSessionId(null);
-    setLoadingStage(null);
+    pollingRef.current = false;
+    setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
   };
 
   const handleGenerateShip30 = async (topic: string, length: number) => {
     if (!activeSessionId) return;
     const sessionIdAtStart = activeSessionId;
-
-    // Immediately show user message in chat
-    const userMsg: Message = {
-      id: `msg-${Date.now()}`,
-      session_id: sessionIdAtStart,
-      role: 'user',
-      content: `Write a Ship 30 for 30 essay about: ${topic}`,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setIsLoading(true);
-    setLoadingSessionId(sessionIdAtStart);
+    setMessages((prev) => [...prev, {
+      id: `msg-${Date.now()}`, session_id: sessionIdAtStart, role: "user",
+      content: `Write a Ship 30 for 30 essay about: ${topic}`, created_at: new Date().toISOString(),
+    }]);
+    setIsLoading(true); setLoadingSessionId(sessionIdAtStart);
     setLoadingStage(`Generating ~${length} word Ship 30 for 30 essay...`);
-
     try {
-      const art = await api.generateShip30Essay({
-        sessionId: sessionIdAtStart,
-        topic,
-        targetLength: length,
-        provider: activeProvider,
-      });
-
-      // Open artifact viewer
-      setActiveArtifact(art);
-      setIsArtifactViewerOpen(true);
-
-      // Reload real messages from DB so View Artifact button / metadata is correct
+      const art = await api.generateShip30Essay({ sessionId: sessionIdAtStart, topic, targetLength: length, provider: activeProvider });
+      setActiveArtifact(art); setIsArtifactViewerOpen(true);
       const freshMsgs = await api.getSessionMessages(sessionIdAtStart);
-
-      // Guarantee the artifact_id is on the last assistant message even if DB metadata is missing
-      const msgsWithArtifact = freshMsgs.map((m, idx) => {
-        const isLastAssistant = m.role === 'assistant' && idx === freshMsgs.length - 1;
-        const alreadyHasArtifact = m.metadata?.artifact_id;
-        if (isLastAssistant && !alreadyHasArtifact) {
+      const msgsWithArt = freshMsgs.map((m, idx) => {
+        if (m.role === "assistant" && idx === freshMsgs.length - 1 && !m.metadata?.artifact_id) {
           return { ...m, metadata: { ...m.metadata, artifact_id: art.id } };
         }
         return m;
       });
-      setMessages(msgsWithArtifact);
-
-      // Refresh session list (title may have changed)
-      const updatedSessions = await api.listSessions();
-      setSessions(updatedSessions);
-
+      setMessages(msgsWithArt);
+      setSessions(await api.listSessions());
     } catch (e) {
-      console.error('Ship 30 generation error:', e);
+      console.error("Ship 30 generation error:", e);
       setMessages((prev) => [...prev, {
-        id: `err-${Date.now()}`,
-        session_id: sessionIdAtStart,
-        role: 'assistant',
-        content: '⚠️ Essay generation failed. Please try again.',
-        created_at: new Date().toISOString(),
+        id: `err-${Date.now()}`, session_id: sessionIdAtStart, role: "assistant",
+        content: "Essay generation failed. Please try again.", created_at: new Date().toISOString(),
       }]);
     } finally {
-      setIsLoading(false);
-      setLoadingSessionId(null);
-      setLoadingStage(null);
-
-      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification('Lenny Growth Assistant', {
-          body: 'Your Ship 30 essay is ready!',
-          icon: '/vite.svg',
-        });
+      setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
+      if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+        new Notification("Lenny Growth Assistant", { body: "Your Ship 30 essay is ready!", icon: "/vite.svg" });
       }
     }
   };
 
-  const handleCitationClick = (citation: Citation) => {
-    setSelectedCitation(citation);
-    setIsSourceDrawerOpen(true);
-  };
-
+  const handleCitationClick = (citation: Citation) => { setSelectedCitation(citation); setIsSourceDrawerOpen(true); };
   const handleOpenArtifact = async (artifactId: string) => {
-    try {
-      const art = await api.getArtifact(artifactId);
-      setActiveArtifact(art);
-      setIsArtifactViewerOpen(true);
-    } catch (e) {
-      console.error('Failed to open artifact:', e);
-    }
+    try { const art = await api.getArtifact(artifactId); setActiveArtifact(art); setIsArtifactViewerOpen(true); }
+    catch (e) { console.error("Failed to open artifact:", e); }
   };
-
   const handleOpenShip30WithContext = (content: string) => {
-    const cleanTopic = content.replace(/[#*`[\]]/g, '').slice(0, 100);
-    setShip30DefaultTopic(cleanTopic);
+    setShip30DefaultTopic(content.replace(/[#*`[\]]/g, "").slice(0, 100));
     setIsShip30ModalOpen(true);
   };
 
@@ -368,25 +245,15 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0B0D13] font-sans text-gray-100">
-      {/* Top Header */}
       <Header
-        currentSessionTitle={currentSession?.title || 'Intelligence Workspace'}
+        currentSessionTitle={currentSession?.title || "Intelligence Workspace"}
         llmStatus={llmStatus}
         activeProvider={activeProvider}
         onOpenModelSelector={() => setIsModelSelectorOpen(true)}
-        onOpenSourcesList={() => {
-          setSelectedCitation(null);
-          setIsSourceDrawerOpen(true);
-        }}
-        onOpenShip30Modal={() => {
-          setShip30DefaultTopic('');
-          setIsShip30ModalOpen(true);
-        }}
+        onOpenSourcesList={() => { setSelectedCitation(null); setIsSourceDrawerOpen(true); }}
+        onOpenShip30Modal={() => { setShip30DefaultTopic(""); setIsShip30ModalOpen(true); }}
       />
-
-      {/* Main 3-Zone Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
         <Sidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -394,17 +261,9 @@ export const App: React.FC = () => {
           onSelectSession={selectSession}
           onNewSession={createNewSession}
           onDeleteSession={deleteSession}
-          onOpenShip30Modal={() => {
-            setShip30DefaultTopic('');
-            setIsShip30ModalOpen(true);
-          }}
-          onOpenSourcesList={() => {
-            setSelectedCitation(null);
-            setIsSourceDrawerOpen(true);
-          }}
+          onOpenShip30Modal={() => { setShip30DefaultTopic(""); setIsShip30ModalOpen(true); }}
+          onOpenSourcesList={() => { setSelectedCitation(null); setIsSourceDrawerOpen(true); }}
         />
-
-        {/* Center Chat Area */}
         <ChatArea
           messages={messages}
           isLoading={isLoading && loadingSessionId === activeSessionId}
@@ -415,35 +274,15 @@ export const App: React.FC = () => {
           onOpenArtifact={handleOpenArtifact}
           onGenerateShip30={handleOpenShip30WithContext}
         />
-
-        {/* Right Artifact Viewer */}
-        <ArtifactViewer
-          artifact={activeArtifact}
-          isOpen={isArtifactViewerOpen}
-          onClose={() => setIsArtifactViewerOpen(false)}
-        />
+        <ArtifactViewer artifact={activeArtifact} isOpen={isArtifactViewerOpen} onClose={() => setIsArtifactViewerOpen(false)} />
       </div>
-
-      {/* Interactive Sources Drawer */}
-      <SourceDrawer
-        isOpen={isSourceDrawerOpen}
-        onClose={() => setIsSourceDrawerOpen(false)}
-        citations={allCitations}
-        selectedCitation={selectedCitation}
-      />
-
-      {/* Ship 30 for 30 Skill Modal */}
+      <SourceDrawer isOpen={isSourceDrawerOpen} onClose={() => setIsSourceDrawerOpen(false)} citations={allCitations} selectedCitation={selectedCitation} />
       <Ship30Modal
         isOpen={isShip30ModalOpen}
         onClose={() => setIsShip30ModalOpen(false)}
-        onGenerate={(topic, length) => {
-          setIsShip30ModalOpen(false);
-          handleGenerateShip30(topic, length);
-        }}
+        onGenerate={(topic, length) => { setIsShip30ModalOpen(false); handleGenerateShip30(topic, length); }}
         defaultTopic={ship30DefaultTopic}
       />
-
-      {/* Model Selector Modal */}
       <ModelSelector
         isOpen={isModelSelectorOpen}
         onClose={() => setIsModelSelectorOpen(false)}

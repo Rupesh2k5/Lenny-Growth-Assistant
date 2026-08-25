@@ -1,12 +1,13 @@
 import json
 import time
 import uuid
+import asyncio
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.database import get_db, AsyncSessionLocal
 from app.db.models import Session, Message, Artifact
@@ -38,6 +39,182 @@ class ChatResponse(BaseModel):
     model: str
     latency_ms: float
     artifact_id: Optional[str] = None
+
+class QueueResponse(BaseModel):
+    user_message_id: str
+    assistant_message_id: str
+    session_id: str
+    status: str = "generating"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Background generation — runs independently of browser connection
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _run_generation(
+    session_id: str,
+    user_message: str,
+    assistant_msg_id: str,
+    provider_name: Optional[str]
+):
+    """
+    Runs completely independently from the HTTP request lifecycle.
+    Even if the browser refreshes, this keeps running and saves result to DB.
+    """
+    start_time = time.time()
+    try:
+        async with AsyncSessionLocal() as db:
+            # Retrieve context
+            retrieved_chunks = await retriever.retrieve_relevant_chunks(user_message, db)
+            retrieval_context = retriever.format_retrieval_context(retrieved_chunks)
+
+            provider = provider_factory.get_provider(provider_name)
+            intent = intent_router.classify_intent(user_message)
+
+            # Fetch history
+            hist_res = await db.execute(
+                select(Message).where(Message.session_id == session_id).order_by(Message.created_at)
+            )
+            history_msgs = [{"role": m.role, "content": m.content} for m in hist_res.scalars().all()[-6:]]
+
+            full_content = []
+            artifact_id = None
+
+            if intent == AgentIntent.OUT_OF_SCOPE:
+                text = (
+                    "### I couldn't find sufficient evidence in Lenny's knowledge base\n\n"
+                    f"The transcripts do not contain verified information regarding *\"{user_message}\"*.\n\n"
+                    "Try asking about: Product Strategy (Brian Chesky), Growth Loops (Elena Verna), Prioritization (Shreyas Doshi), PMF (Sean Ellis), or Positioning (April Dunford)."
+                )
+                full_content = [text]
+            elif intent == AgentIntent.SHIP_30_ESSAY:
+                skill = Ship30Skill(provider)
+                essay_result = await skill.generate_essay(user_message, retrieval_context)
+                essay_text = essay_result["content"]
+                art = Artifact(
+                    session_id=session_id,
+                    title=essay_result["title"],
+                    artifact_type="markdown",
+                    content=essay_text,
+                    sanitized_content=essay_text,
+                    artifact_metadata={"skill": "ship30", "word_count": essay_result["word_count"]}
+                )
+                db.add(art)
+                await db.flush()
+                artifact_id = art.id
+                full_content = [essay_text]
+            else:
+                agent = GroundedAssistantAgent(provider)
+                prompt_msgs = agent.build_prompt_messages(user_message, retrieval_context, history_msgs)
+                async for token in provider.stream_response(prompt_msgs):
+                    full_content.append(token)
+
+            complete_text = "".join(full_content)
+            citations_data = citation_validator.extract_cited_sources(complete_text, retrieved_chunks)
+            latency_ms = round((time.time() - start_time) * 1000, 2)
+
+            # Update the pre-saved placeholder message with final content
+            await db.execute(
+                update(Message)
+                .where(Message.id == assistant_msg_id)
+                .values(
+                    content=complete_text,
+                    citations=citations_data,
+                    message_metadata={
+                        "status": "complete",
+                        "intent": intent.value,
+                        "provider": provider.model_name,
+                        "latency_ms": latency_ms,
+                        "artifact_id": artifact_id
+                    }
+                )
+            )
+            await db.commit()
+            logger.info(f"Background generation complete for msg {assistant_msg_id}")
+
+    except Exception as e:
+        logger.error(f"Background generation failed for {assistant_msg_id}: {e}")
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(Message)
+                .where(Message.id == assistant_msg_id)
+                .values(
+                    content=f"⚠️ Generation failed: {str(e)}",
+                    message_metadata={"status": "error"}
+                )
+            )
+            await db.commit()
+
+
+@router.post("/queue", response_model=QueueResponse)
+async def queue_chat(request_body: ChatRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """
+    Queue-based chat endpoint. Saves messages to DB immediately, then generates
+    in the background — generation survives browser refreshes and disconnections.
+    Frontend polls /sessions/{id}/messages to get updates.
+    """
+    # 1. Ensure session exists
+    session_res = await db.execute(select(Session).where(Session.id == request_body.session_id))
+    session = session_res.scalar_one_or_none()
+    if not session:
+        session = Session(
+            id=request_body.session_id,
+            title=request_body.message[:35] + ("..." if len(request_body.message) > 35 else "")
+        )
+        db.add(session)
+    elif session.title in ("New Conversation", ""):
+        session.title = request_body.message[:35] + ("..." if len(request_body.message) > 35 else "")
+    await db.commit()
+
+    # 2. Save user message immediately
+    user_msg_id = str(uuid.uuid4())
+    user_msg = Message(id=user_msg_id, session_id=session.id, role="user", content=request_body.message)
+    db.add(user_msg)
+
+    # 3. Save placeholder assistant message with status=generating
+    assistant_msg_id = str(uuid.uuid4())
+    placeholder = Message(
+        id=assistant_msg_id,
+        session_id=session.id,
+        role="assistant",
+        content="",  # empty — frontend shows loading until content appears
+        message_metadata={"status": "generating"}
+    )
+    db.add(placeholder)
+    await db.commit()
+
+    # 4. Fire generation in background — survives browser disconnect
+    background_tasks.add_task(
+        _run_generation,
+        session.id,
+        request_body.message,
+        assistant_msg_id,
+        request_body.provider
+    )
+
+    return QueueResponse(
+        user_message_id=user_msg_id,
+        assistant_message_id=assistant_msg_id,
+        session_id=session.id,
+        status="generating"
+    )
+
+
+@router.get("/status/{message_id}")
+async def get_message_status(message_id: str, db: AsyncSession = Depends(get_db)):
+    """Poll endpoint — returns current status and content of a message."""
+    res = await db.execute(select(Message).where(Message.id == message_id))
+    msg = res.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    meta = msg.message_metadata or {}
+    return {
+        "id": msg.id,
+        "status": meta.get("status", "complete"),
+        "content": msg.content,
+        "citations": msg.citations or [],
+        "metadata": meta
+    }
+
 
 @router.post("", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest, db: AsyncSession = Depends(get_db)):
