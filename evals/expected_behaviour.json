@@ -1,0 +1,23 @@
+{
+  "system_name": "Lenny Growth Assistant",
+  "rag_thresholds": {
+    "grounded_citation_rate_minimum": 0.95,
+    "unsupported_question_refusal_rate": 1.00,
+    "max_allowed_latency_ms": 3500.0
+  },
+  "skill_contracts": {
+    "grounded_assistant": {
+      "purpose": "Accurate, concise product and growth question answering",
+      "grounding_rule": "Strictly cite [S1], [S2] for all factual claims",
+      "refusal_behavior": "Explicit statement of insufficient evidence"
+    },
+    "ship30": {
+      "purpose": "Synthesize knowledge into ~1,250-word digital essays",
+      "style": "Hook, 1/3/1 cadence, bolded takeaways, actionable framework"
+    },
+    "artifact_builder": {
+      "purpose": "Generate interactive HTML simulators and markdown reference cards",
+      "security": "Strictly sandboxed execution without DOM escape"
+    }
+  }
+}

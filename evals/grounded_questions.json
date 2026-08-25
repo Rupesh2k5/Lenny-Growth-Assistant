@@ -1,0 +1,50 @@
+[
+  {
+    "id": "GQ-001",
+    "question": "What is Brian Chesky's 11-star experience framework and why does he use it at Airbnb?",
+    "expected_speaker": "Brian Chesky",
+    "expected_topics": ["11-star experience", "extreme brainstorming", "backwards design"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  },
+  {
+    "id": "GQ-002",
+    "question": "How does Elena Verna distinguish between B2B and B2C growth loops?",
+    "expected_speaker": "Elena Verna",
+    "expected_topics": ["product-led sales", "reverse trial", "freemium", "growth loops"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  },
+  {
+    "id": "GQ-003",
+    "question": "Explain Shreyas Doshi's LNO framework for PM task prioritization.",
+    "expected_speaker": "Shreyas Doshi",
+    "expected_topics": ["Leverage", "Neutral", "Overhead", "energy management"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  },
+  {
+    "id": "GQ-004",
+    "question": "What is the 40% rule for Product-Market Fit according to Sean Ellis?",
+    "expected_speaker": "Sean Ellis",
+    "expected_topics": ["very disappointed", "40% threshold", "PMF survey"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  },
+  {
+    "id": "GQ-005",
+    "question": "What are the 5 components of product positioning according to April Dunford?",
+    "expected_speaker": "April Dunford",
+    "expected_topics": ["competitive alternatives", "differentiated features", "value", "target customer", "market category"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  },
+  {
+    "id": "GQ-006",
+    "question": "How did Rahul Vohra build the Superhuman Product-Market Fit engine?",
+    "expected_speaker": "Rahul Vohra",
+    "expected_topics": ["high-expectation customers", "PMF score", "40%", "segmentation"],
+    "minimum_citations": 1,
+    "should_refuse": false
+  }
+]

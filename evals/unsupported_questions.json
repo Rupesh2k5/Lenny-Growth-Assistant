@@ -1,0 +1,26 @@
+[
+  {
+    "id": "UQ-001",
+    "question": "What does Lenny say about nuclear fusion reactor design?",
+    "should_refuse": true,
+    "expected_refusal_phrase": "couldn't find sufficient evidence"
+  },
+  {
+    "id": "UQ-002",
+    "question": "How do you calculate gravitational wave strain using quantum sensors?",
+    "should_refuse": true,
+    "expected_refusal_phrase": "couldn't find sufficient evidence"
+  },
+  {
+    "id": "UQ-003",
+    "question": "What is the best recipe for baking sourdough bread according to Lenny's guests?",
+    "should_refuse": true,
+    "expected_refusal_phrase": "couldn't find sufficient evidence"
+  },
+  {
+    "id": "UQ-004",
+    "question": "How do you configure Kubernetes ingress controllers on AWS EKS?",
+    "should_refuse": true,
+    "expected_refusal_phrase": "couldn't find sufficient evidence"
+  }
+]

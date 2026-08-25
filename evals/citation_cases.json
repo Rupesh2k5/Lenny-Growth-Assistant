@@ -1,0 +1,23 @@
+[
+  {
+    "id": "CC-001",
+    "query": "What is Founder Mode and who talks about it?",
+    "target_episode": "EP-101",
+    "target_guest": "Brian Chesky",
+    "required_token": "[S"
+  },
+  {
+    "id": "CC-002",
+    "query": "What is the difference between Freemium and Reverse Trial?",
+    "target_episode": "EP-102",
+    "target_guest": "Elena Verna",
+    "required_token": "[S"
+  },
+  {
+    "id": "CC-003",
+    "query": "How should PMs allocate their energy between Leverage, Neutral, and Overhead tasks?",
+    "target_episode": "EP-103",
+    "target_guest": "Shreyas Doshi",
+    "required_token": "[S"
+  }
+]
