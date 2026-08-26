@@ -43,11 +43,23 @@ async def generate_ship30_essay(body: Ship30Request, db: AsyncSession = Depends(
     retrieval_context = retriever.format_retrieval_context(retrieved)
 
     skill = Ship30Skill(provider)
-    result = await skill.generate_essay(
-        topic=body.topic,
-        retrieval_context=retrieval_context,
-        target_length=body.target_length or 1250
+    prompt_msgs = skill.build_prompt_messages(body.topic, retrieval_context, body.target_length or 1250)
+
+    from app.agents.ship30 import SHIP30_SYSTEM_PROMPT
+    response = await provider.generate_response(
+        messages=prompt_msgs,
+        system_prompt=SHIP30_SYSTEM_PROMPT,
+        temperature=0.6
     )
+    content = response.content
+
+    result = {
+        "title": skill.extract_title(content, body.topic),
+        "content": content,
+        "word_count": len(content.split()),
+        "model": response.model,
+        "provider": response.provider
+    }
 
     # Save to artifacts table
     artifact = Artifact(
