@@ -132,13 +132,26 @@ async def _run_generation(
             logger.info(f"Background generation complete for msg {assistant_msg_id}")
 
     except Exception as e:
-        logger.error(f"Background generation failed for {assistant_msg_id}: {e}")
+        error_str = str(e)
+        logger.error(f"Background generation failed for {assistant_msg_id}: {error_str}")
+        
+        friendly_msg = f"⚠️ **Generation failed:** {error_str}"
+        
+        if "API_KEY is not configured" in error_str:
+            friendly_msg = f"### Missing API Key\n\n{error_str}\n\nPlease add your API key to the `.env` file or switch back to the local `ollama` provider in the top right menu."
+        elif "ConnectError" in error_str or "ConnectionRefusedError" in error_str:
+            friendly_msg = "### Connection Refused\n\nUnable to reach the active LLM provider. If you are using local Ollama, please ensure the Ollama desktop app is running."
+        elif "TimeoutException" in error_str or "ReadTimeout" in error_str:
+            friendly_msg = "### Request Timed Out\n\nThe LLM took too long to respond. This might happen if your local machine is under heavy load or pulling a new model."
+        elif "Model not found" in error_str:
+            friendly_msg = "### Model Not Found\n\nThe requested model is not downloaded. Run `ollama pull llama3.1:8b` in your terminal to fetch it."
+
         async with AsyncSessionLocal() as db:
             await db.execute(
                 update(Message)
                 .where(Message.id == assistant_msg_id)
                 .values(
-                    content=f"⚠️ Generation failed: {str(e)}",
+                    content=friendly_msg,
                     message_metadata={"status": "error"}
                 )
             )
