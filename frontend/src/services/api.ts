@@ -84,7 +84,7 @@ export const api = {
     metadata: any;
   }> {
     const res = await fetch(`${API_BASE}/chat/status/${messageId}`);
-    if (!res.ok) throw new Error('Failed to poll message');
+    if (!res.ok) throw new Error(`Failed to poll message: ${res.status}`);
     return res.json();
   },
 

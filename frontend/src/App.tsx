@@ -205,7 +205,22 @@ export const App: React.FC = () => {
         if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
           new Notification('Lenny Growth Assistant', { body: 'Your response is ready!', icon: '/vite.svg' });
         }
-      } catch (e) {
+      } catch (e: any) {
+        // If the message is explicitly not found (e.g. deleted), stop polling immediately
+        if (e.message && e.message.includes('404')) {
+          setIsLoading(false);
+          setLoadingSessionId(null);
+          setLoadingStage(null);
+          pollingRef.current = false;
+          
+          setMessages((prev) => prev.map((m) =>
+            m.id === messageId
+              ? { ...m, content: "⚠️ Generation failed: Message was deleted or lost.", metadata: { status: 'error' } }
+              : m
+          ));
+          return;
+        }
+
         // Network hiccup — retry after 1s
         await new Promise((r) => setTimeout(r, 1000));
         return poll();
