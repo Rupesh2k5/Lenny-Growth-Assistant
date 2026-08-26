@@ -93,21 +93,25 @@ async def _run_generation(
                 active_streams[assistant_msg_id] = text
             elif intent == AgentIntent.SHIP_30_ESSAY:
                 skill = Ship30Skill(provider)
-                essay_result = await skill.generate_essay(user_message, retrieval_context)
-                essay_text = essay_result["content"]
+                prompt_msgs = skill.build_prompt_messages(user_message, retrieval_context)
+                
+                from app.agents.ship30 import SHIP30_SYSTEM_PROMPT
+                async for token in provider.stream_response(prompt_msgs, system_prompt=SHIP30_SYSTEM_PROMPT, temperature=0.6):
+                    full_content.append(token)
+                    active_streams[assistant_msg_id] += token
+                
+                essay_text = "".join(full_content)
                 art = Artifact(
                     session_id=session_id,
-                    title=essay_result["title"],
+                    title=skill.extract_title(essay_text, user_message),
                     artifact_type="markdown",
                     content=essay_text,
                     sanitized_content=essay_text,
-                    artifact_metadata={"skill": "ship30", "word_count": essay_result["word_count"]}
+                    artifact_metadata={"skill": "ship30", "word_count": len(essay_text.split())}
                 )
                 db.add(art)
                 await db.flush()
                 artifact_id = art.id
-                full_content = [essay_text]
-                active_streams[assistant_msg_id] = essay_text
             else:
                 agent = GroundedAssistantAgent(provider)
                 prompt_msgs = agent.build_prompt_messages(user_message, retrieval_context, history_msgs)

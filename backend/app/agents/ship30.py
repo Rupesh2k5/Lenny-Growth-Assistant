@@ -19,12 +19,7 @@ class Ship30Skill:
     def __init__(self, provider: BaseLLMProvider):
         self.provider = provider
 
-    async def generate_essay(
-        self,
-        topic: str,
-        retrieval_context: str,
-        target_length: int = 1250
-    ) -> Dict[str, Any]:
+    def build_prompt_messages(self, topic: str, retrieval_context: str, target_length: int = 1250) -> list:
         user_prompt = f"""RETRIEVED KNOWLEDGE BASE EXCERPTS:
 {retrieval_context}
 
@@ -34,20 +29,8 @@ TOPIC TO WRITE ABOUT:
 INSTRUCTIONS:
 Write a full ~{target_length} word Ship 30 for 30 style essay synthesizing the retrieved insights. Include inline citations [S1], [S2] to ground all guest quotes and frameworks. Ensure strong headline and hook.
 """
-        messages = [{"role": "user", "content": user_prompt}]
-        response = await self.provider.generate_response(
-            messages=messages,
-            system_prompt=SHIP30_SYSTEM_PROMPT,
-            temperature=0.6
-        )
+        return [{"role": "user", "content": user_prompt}]
 
-        content = response.content
-        title_line = content.split("\n")[0].replace("#", "").strip() if content.startswith("#") else f"Ship 30 Essay: {topic}"
-
-        return {
-            "title": title_line,
-            "content": content,
-            "word_count": len(content.split()),
-            "model": response.model,
-            "provider": response.provider
-        }
+    def extract_title(self, content: str, default_topic: str) -> str:
+        title_line = content.split("\n")[0].replace("#", "").strip() if content.startswith("#") else f"Ship 30 Essay: {default_topic}"
+        return title_line
