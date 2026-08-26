@@ -50,6 +50,9 @@ class QueueResponse(BaseModel):
 # Background generation — runs independently of browser connection
 # ─────────────────────────────────────────────────────────────────────────────
 
+# In-memory store for real-time token streaming across polling requests
+active_streams: Dict[str, str] = {}
+
 async def _run_generation(
     session_id: str,
     user_message: str,
@@ -78,6 +81,7 @@ async def _run_generation(
 
             full_content = []
             artifact_id = None
+            active_streams[assistant_msg_id] = ""
 
             if intent == AgentIntent.OUT_OF_SCOPE:
                 text = (
@@ -86,6 +90,7 @@ async def _run_generation(
                     "Try asking about: Product Strategy (Brian Chesky), Growth Loops (Elena Verna), Prioritization (Shreyas Doshi), PMF (Sean Ellis), or Positioning (April Dunford)."
                 )
                 full_content = [text]
+                active_streams[assistant_msg_id] = text
             elif intent == AgentIntent.SHIP_30_ESSAY:
                 skill = Ship30Skill(provider)
                 essay_result = await skill.generate_essay(user_message, retrieval_context)
@@ -102,11 +107,13 @@ async def _run_generation(
                 await db.flush()
                 artifact_id = art.id
                 full_content = [essay_text]
+                active_streams[assistant_msg_id] = essay_text
             else:
                 agent = GroundedAssistantAgent(provider)
                 prompt_msgs = agent.build_prompt_messages(user_message, retrieval_context, history_msgs)
                 async for token in provider.stream_response(prompt_msgs):
                     full_content.append(token)
+                    active_streams[assistant_msg_id] += token
 
             complete_text = "".join(full_content)
             citations_data = citation_validator.extract_cited_sources(complete_text, retrieved_chunks)
@@ -146,6 +153,8 @@ async def _run_generation(
         elif "Model not found" in error_str:
             friendly_msg = "### Model Not Found\n\nThe requested model is not downloaded. Run `ollama pull llama3.1:8b` in your terminal to fetch it."
 
+        active_streams[assistant_msg_id] = friendly_msg
+
         async with AsyncSessionLocal() as db:
             await db.execute(
                 update(Message)
@@ -156,6 +165,10 @@ async def _run_generation(
                 )
             )
             await db.commit()
+    finally:
+        # Give clients a few seconds to poll the final state, then clean up memory
+        await asyncio.sleep(10)
+        active_streams.pop(assistant_msg_id, None)
 
 
 @router.post("/queue", response_model=QueueResponse)
@@ -163,8 +176,9 @@ async def queue_chat(request_body: ChatRequest, background_tasks: BackgroundTask
     """
     Queue-based chat endpoint. Saves messages to DB immediately, then generates
     in the background — generation survives browser refreshes and disconnections.
-    Frontend polls /sessions/{id}/messages to get updates.
+    Frontend polls /status/{id} to get streaming updates.
     """
+
     # 1. Ensure session exists
     session_res = await db.execute(select(Session).where(Session.id == request_body.session_id))
     session = session_res.scalar_one_or_none()
@@ -219,11 +233,19 @@ async def get_message_status(message_id: str, db: AsyncSession = Depends(get_db)
     msg = res.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
+    
     meta = msg.message_metadata or {}
+    status = meta.get("status", "complete")
+    content = msg.content
+
+    # If still generating, pull the real-time partial text from memory
+    if status == "generating" and message_id in active_streams:
+        content = active_streams[message_id]
+
     return {
         "id": msg.id,
-        "status": meta.get("status", "complete"),
-        "content": msg.content,
+        "status": status,
+        "content": content,
         "citations": msg.citations or [],
         "metadata": meta
     }

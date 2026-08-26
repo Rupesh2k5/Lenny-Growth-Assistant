@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Header } from "./components/layout/Header";
 import { Sidebar } from "./components/layout/Sidebar";
 import { ChatArea } from "./components/chat/ChatArea";
@@ -143,51 +143,75 @@ export const App: React.FC = () => {
     }
   };
 
+  // Polls /chat/status/{id} frequently to stream in tokens
   const pollUntilComplete = async (messageId: string, sessionId: string) => {
     pollingRef.current = true;
-    const MAX_POLLS = 150;
+    const MAX_POLLS = 600; // 5 minutes at 500ms per poll
     let polls = 0;
+
     const poll = async (): Promise<void> => {
       if (!pollingRef.current || polls >= MAX_POLLS) {
-        setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
+        setIsLoading(false);
+        setLoadingSessionId(null);
+        setLoadingStage(null);
         return;
       }
       polls++;
+
       try {
         const status = await api.pollMessageStatus(messageId);
-        if (status.status === "generating" || status.content === "") {
-          if (polls < 3) setLoadingStage("Searching Lenny transcript repository...");
-          else if (polls < 8) setLoadingStage("Synthesizing insights from transcripts...");
-          else setLoadingStage("Generating grounded response...");
-          await new Promise((r) => setTimeout(r, 2000));
-          return poll();
-        }
+
+        // Update the UI with the real-time stream content immediately
         setMessages((prev) => prev.map((m) =>
           m.id === messageId
-            ? { ...m, content: status.content, citations: status.citations || [], metadata: status.metadata || {} }
+            ? { ...m, content: status.content || m.content, citations: status.citations || [], metadata: status.metadata || {} }
             : m
         ));
+
+        if (status.status === 'generating') {
+          // Keep polling every 500ms to get the next chunk of tokens
+          if (polls < 6) setLoadingStage('Searching Lenny transcript repository...');
+          else if (polls < 12) setLoadingStage('Synthesizing insights from transcripts...');
+          else setLoadingStage('Generating grounded response...');
+          
+          await new Promise((r) => setTimeout(r, 500));
+          return poll();
+        }
+
+        // --- Complete or Error ---
+        
+        // Open artifact viewer if artifact was generated
         if (status.metadata?.artifact_id) {
           try {
             const art = await api.getArtifact(status.metadata.artifact_id);
-            setActiveArtifact(art); setIsArtifactViewerOpen(true);
+            setActiveArtifact(art);
+            setIsArtifactViewerOpen(true);
           } catch (e) { console.error(e); }
         }
+
         if (status.citations?.length > 0) {
           setAllCitations((prev) => [...prev, ...status.citations]);
         }
+
+        // Refresh session title in sidebar
         const updatedSessions = await api.listSessions();
         setSessions(updatedSessions);
-        setIsLoading(false); setLoadingSessionId(null); setLoadingStage(null);
+
+        setIsLoading(false);
+        setLoadingSessionId(null);
+        setLoadingStage(null);
         pollingRef.current = false;
-        if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-          new Notification("Lenny Growth Assistant", { body: "Your response is ready!", icon: "/vite.svg" });
+
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification('Lenny Growth Assistant', { body: 'Your response is ready!', icon: '/vite.svg' });
         }
       } catch (e) {
-        await new Promise((r) => setTimeout(r, 2000));
+        // Network hiccup — retry after 1s
+        await new Promise((r) => setTimeout(r, 1000));
         return poll();
       }
     };
+
     return poll();
   };
 
